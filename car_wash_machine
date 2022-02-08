@@ -1,0 +1,1008 @@
+
+-- Main--
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity e_axis is
+	generic( n: natural := 7; wrk: integer := 100);
+	port (	sl_clock, sl_reset_n:	in		std_logic;
+			sl_cmd_to_bas_pos:		in		std_logic;
+			sl_cmd_to_wrk_pos:		in		std_logic;
+			i_speed_s_pro_m:		in		integer range 0 to 99; 	-- min. speed is 99 s/m
+			i_pos:					out		integer range 0 to wrk;
+			sl_axis_moving:			out		std_logic;
+			sl_in_bas_pos:			out		std_logic;
+			sl_in_wrk_pos:			out		std_logic
+	);
+end entity e_axis;
+
+architecture a_axis of e_axis is
+
+-- Declarations:
+
+-- Signal Declarations:
+	signal i_pos_int:				integer range 0 to wrk;
+	signal sl_axis_moving_int:		std_logic;
+	signal sl_in_bas_pos_int:		std_logic := '0';
+	signal sl_in_wrk_pos_int:		std_logic := '0';
+	
+	signal sl_rollover_value_1mm_int:	std_logic_vector(22 downto 0);
+	
+	
+	signal sl_rollover_slow_enable_1mm_int:	std_logic;
+	
+
+	component e_modulo_counter
+	generic( n: natural := 31);
+	port (	sl_clock, sl_reset_n:	in		std_logic;
+			sl_enable:				in		std_logic;
+			slv_rollover_value:		in		std_logic_vector(n-1 downto 0);
+			slv_Q:					out		std_logic_vector(n-1 downto 0);
+			sl_rollover:			out		std_logic
+	);
+	end component;
+	
+begin
+
+-- Assignments:
+
+-- Concurrent Assignments:
+	i_pos 			<= i_pos_int;
+	sl_axis_moving 	<= sl_axis_moving_int;
+	sl_in_bas_pos	<=	sl_in_bas_pos_int;
+	sl_in_wrk_pos 	<=	sl_in_wrk_pos_int;
+	
+	sl_rollover_value_1mm_int	<=	std_logic_vector(to_unsigned((1 * i_speed_s_pro_m),23));	--multiplicator reduced from normally 50000 (50000000/1000 because unit is mm and not m) to 1 for simulation purposes
+	
+-- Conditional Signal Assignments:
+	
+	sl_axis_moving_int <= '1' when ((i_speed_s_pro_m /= 0) and (((sl_cmd_to_bas_pos = '1') and (sl_in_bas_pos_int = '0')) or ((sl_cmd_to_wrk_pos = '1')  and (sl_in_wrk_pos_int = '0')))) else '0';
+	
+-- Sequential process with async. low-active reset:
+	p_move_axis: process(sl_clock, sl_reset_n)
+	begin
+		if(sl_reset_n = '0') then
+			i_pos_int <= 0;
+			sl_in_bas_pos_int <= '0';
+			sl_in_wrk_pos_int <= '0';
+		elsif(rising_edge(sl_clock)) then
+			if(sl_rollover_slow_enable_1mm_int = '1') then
+				if(sl_cmd_to_bas_pos = '1') then
+					i_pos_int <= i_pos_int-1;
+				elsif(sl_cmd_to_wrk_pos = '1') then
+					i_pos_int <= i_pos_int+1;
+				end if;
+			end if;
+			if (((i_pos_int = 0) and ((sl_rollover_slow_enable_1mm_int = '0') or (sl_cmd_to_wrk_pos = '0'))) or ((i_pos_int = 1) and (sl_rollover_slow_enable_1mm_int = '1') and (sl_cmd_to_bas_pos = '1'))) then
+				sl_in_bas_pos_int <= '1';
+			else
+				sl_in_bas_pos_int <= '0';
+			end if;	
+			if (((i_pos_int = wrk) and ((sl_rollover_slow_enable_1mm_int = '0') or (sl_cmd_to_bas_pos = '0'))) or ((i_pos_int = wrk-1) and (sl_rollover_slow_enable_1mm_int = '1') and (sl_cmd_to_wrk_pos = '1'))) then
+				sl_in_wrk_pos_int <= '1';
+			else
+				sl_in_wrk_pos_int <= '0';
+			end if;	
+		end if;
+	end process p_move_axis;
+	
+	
+	-- Component Instantiations:
+	I_my_slow_enable_1sec: e_modulo_counter	
+		generic map (	n => 23)
+		port map (	sl_clock			=>	sl_clock,
+					sl_reset_n			=>	sl_axis_moving_int,
+					sl_enable 			=>	sl_axis_moving_int,
+					slv_rollover_value 	=>	sl_rollover_value_1mm_int,		--std_logic_vector(to_unsigned(c_COUNTER_MAXVAL, n)),
+					slv_Q				=>	open,
+					sl_rollover			=>	sl_rollover_slow_enable_1mm_int
+				);
+	
+end architecture a_axis;
+--LED DISPLAY--
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+ 
+entity e_price_calculation is
+
+	port ( 	slv_program_selection	: in 	std_logic_vector(4 downto 0); 	-- input switch for selection 
+			slv_price_result_out 	: out 	std_logic_vector(4 downto 0)); 	-- output - calculated price to be displayed, maximum possible price (if constants get changed in program) is 31 Euro
+			 		
+end entity e_price_calculation;
+
+architecture a_price_calculation of e_price_calculation is
+
+-- Signal Declarations:
+
+	signal 		u_total_price_int: 				unsigned( 4 downto 0 )	:= "00000";
+	signal 		u_intermediate_price_1_int: 	unsigned( 4 downto 0 )	:= "00000";
+	signal 		u_intermediate_price_2_int: 	unsigned( 4 downto 0 )	:= "00000";
+	signal 		u_intermediate_price_3_int: 	unsigned( 4 downto 0 )	:= "00000";
+	
+	signal 		u_rims_price_int: 			unsigned( 4 downto 0 )	:= "00000";
+	signal 		u_undercarriage_price_int:	unsigned( 4 downto 0 )	:= "00000";
+	signal 		u_wax_price_int: 			unsigned( 4 downto 0 )	:= "00000";
+	signal 		u_polish_price_int: 		unsigned( 4 downto 0 )	:= "00000";
+	signal 		u_shine_price_int: 			unsigned( 4 downto 0 )	:= "00000";
+	
+	
+	constant 	c_base_price: 			unsigned( 4 downto 0 ) 	:= "00100";
+	constant 	c_null_price: 			unsigned( 4 downto 0 ) 	:= "00000";
+	
+	constant 	c_rims_price: 			unsigned( 4 downto 0 ) 	:= "00001";
+	constant 	c_undercarriage_price: 	unsigned( 4 downto 0 ) 	:= "00010";
+	constant 	c_wax_price: 			unsigned( 4 downto 0 ) 	:= "00011";
+	constant 	c_polish_price: 		unsigned( 4 downto 0 ) 	:= "00010";
+	constant 	c_shine_price: 			unsigned( 4 downto 0 ) 	:= "00001";
+	
+	begin
+
+--all prices are summed up here, the unsigned price values of the options get written in the process below, if the options are not activated, their price is written to 0, 
+--adding up into intermediate signals using an adder tree, to optimize the timing and avoid a longer daisy chain of summing up the individual prices	
+	u_intermediate_price_1_int <= 	c_base_price + u_rims_price_int;
+	u_intermediate_price_2_int <=	u_undercarriage_price_int + u_wax_price_int;
+	u_intermediate_price_3_int <=	u_polish_price_int + u_shine_price_int;
+
+--sum up the three intermediate values to the total price	
+--note: splitting up the adding of the intermediate values one more time would not result in any improvement,
+--because in any case it will need two steps to sum up, so the three intermediate values are just added as they are	
+	u_total_price_int <= u_intermediate_price_1_int + u_intermediate_price_2_int + u_intermediate_price_3_int; 
+
+	
+--Process that handles cost per operations. 
+--Basic price is 4 Euro
+--Each extra selection costs an extra amount of money as defined in the constants. 
+--The total sum adds up from the basic price and the costs of the activated options
+--The total sum will be returned as slv output.
+
+	price_calc:	process (slv_program_selection) is
+	
+	begin
+		if (slv_program_selection(0) = '1') then
+			u_rims_price_int <= c_rims_price;
+		else
+			u_rims_price_int <= c_null_price;		
+		end if;
+		
+		if (slv_program_selection(1) = '1') then
+			u_undercarriage_price_int <= c_undercarriage_price;
+		else
+			u_undercarriage_price_int <= c_null_price;		
+		end if;
+		
+		if (slv_program_selection(2) = '1') then
+			u_wax_price_int <= c_wax_price;
+		else
+			u_wax_price_int <= c_null_price;		
+		end if;
+		
+		if (slv_program_selection(3) = '1') then
+			u_polish_price_int <= c_polish_price;
+		else
+			u_polish_price_int <= c_null_price;		
+		end if;
+		
+		if (slv_program_selection(4) = '1') then
+			u_shine_price_int <= c_shine_price;
+		else
+			u_shine_price_int <= c_null_price;		
+		end if;
+				
+	end process price_calc;
+
+	slv_price_result_out <= std_logic_vector(u_total_price_int);
+
+end architecture a_price_calculation;
+--RAM--
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity e_option_selection is
+   port ( 	sl_store_params 			:  in     	std_logic;
+			sl_selection_enable			:  in		std_logic;
+			sl_rim_cleaning 			:  in     	std_logic;
+			sl_undercarriage_wash 		:  in     	std_logic;
+			sl_waxing 					:  in     	std_logic;
+			sl_polishing 				:  in     	std_logic;
+			sl_shine_wash				:  in     	std_logic;
+			sl_storage_execute	 		:  out    	std_logic;
+			slv_params 					:  out    	std_logic_vector(4 downto 0)
+        );
+
+end entity e_option_selection;
+
+architecture a_option_selection of e_option_selection is
+
+---- Declaration Part -----------------------------------------------
+
+	-- internal signal declaration
+	signal slv_selected_params_int 		:		std_logic_vector(4 downto 0) := "00000";
+	signal sl_storage_int 				:		std_logic := '0';
+	signal sl_trigger_storage_int 		:		std_logic;
+
+begin
+
+---- Assignment Part ------------------------------------------------
+
+	sl_trigger_storage_int <= ((not sl_store_params) and sl_selection_enable);
+
+	slv_params <= slv_selected_params_int;
+	sl_storage_execute <= sl_storage_int;
+	
+	slv_selected_params_int(0) <= sl_rim_cleaning;
+	slv_selected_params_int(1) <= sl_undercarriage_wash;
+	slv_selected_params_int(2) <= sl_waxing;
+	slv_selected_params_int(3) <= sl_polishing;
+	slv_selected_params_int(4) <= sl_shine_wash;
+
+	-- store current options if trigger conditions are fulfilled
+	p_store_options: process(sl_trigger_storage_int)
+      begin
+         if(sl_trigger_storage_int = '1') then
+            sl_storage_int <= '1';
+         else
+			sl_storage_int <= '0';
+         end if;
+      end process p_store_options;
+
+end architecture a_option_selection;
+--PRICE CALCULATION---
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity e_modulo_counter is
+	generic( n: natural := 4 );
+	port (	sl_clock, sl_reset_n:	in		std_logic;
+			sl_enable:				in		std_logic;
+			slv_rollover_value:		in		std_logic_vector(n-1 downto 0);
+			slv_Q:					out		std_logic_vector(n-1 downto 0);
+			sl_rollover:			out		std_logic
+	);
+end entity e_modulo_counter;
+
+architecture a_modulo_counter of e_modulo_counter is
+
+-- Declarations:
+
+-- Signal Declarations:
+	signal u_rollover_value_int:	unsigned(n-1 downto 0):= (others => '0');
+	signal u_counter_int:			unsigned(n-1 downto 0):= (others => '0');
+
+begin
+
+-- Assignments:
+
+-- Concurrent Assignments:
+	slv_Q <= std_logic_vector(u_counter_int);
+	
+	u_rollover_value_int <= unsigned(slv_rollover_value);
+	
+-- Conditional Signal Assignments:
+	sl_rollover <= '1' when (u_counter_int = (u_rollover_value_int-1)) else '0';
+
+-- Sequential process with async. low-active reset:
+	p_mod_cnt: process(sl_clock, sl_reset_n)
+	begin
+		if(sl_reset_n = '0') then
+			u_counter_int <= (others => '0');
+		elsif(rising_edge(sl_clock)) then
+			if(sl_enable = '1') then
+				if(u_counter_int = (u_rollover_value_int-1)) then
+					u_counter_int <= (others => '0');
+				else
+					u_counter_int <= u_counter_int + 1;
+				end if;
+			end if;
+		end if;
+	end process p_mod_cnt;
+
+end architecture a_modulo_counter;
+	--SELECTION--
+  library ieee;
+use ieee.std_logic_1164.all;
+
+entity e_convert_to_7seg is
+   port ( slv_hex      : in  std_logic_vector(5 downto 0);
+          slv_display  : out std_logic_vector(0 to 6)
+		  );
+end entity e_convert_to_7seg;
+
+architecture a_convert_to_7seg of e_convert_to_7seg is
+
+---- Declaration Part -----------------------------------------------
+
+    constant c_0 		: std_logic_vector(0 to 6) 	:= "0000001";
+    constant c_1 		: std_logic_vector(0 to 6) 	:= "1001111";
+    constant c_2 		: std_logic_vector(0 to 6) 	:= "0010010";
+    constant c_3 		: std_logic_vector(0 to 6) 	:= "0000110";
+    constant c_4 		: std_logic_vector(0 to 6) 	:= "1001100";
+    constant c_5 		: std_logic_vector(0 to 6) 	:= "0100100";
+    constant c_6 		: std_logic_vector(0 to 6) 	:= "0100000";
+    constant c_7 		: std_logic_vector(0 to 6) 	:= "0001111";
+    constant c_8 		: std_logic_vector(0 to 6) 	:= "0000000";
+    constant c_9 		: std_logic_vector(0 to 6) 	:= "0000100";
+    constant c_A 		: std_logic_vector(0 to 6) 	:= "0001000";
+    constant c_B 		: std_logic_vector(0 to 6) 	:= "1100000";
+    constant c_C 		: std_logic_vector(0 to 6) 	:= "0110001";
+    constant c_D 		: std_logic_vector(0 to 6) 	:= "1000010";
+    constant c_E 		: std_logic_vector(0 to 6) 	:= "0110000";
+    constant c_F 		: std_logic_vector(0 to 6) 	:= "0111000";
+    constant c_G 		: std_logic_vector(0 to 6) 	:= "0100001";
+    constant c_H 		: std_logic_vector(0 to 6) 	:= "1101000";
+    constant c_I 		: std_logic_vector(0 to 6) 	:= "1111001";
+    constant c_J 		: std_logic_vector(0 to 6) 	:= "1000011";
+    constant c_K 		: std_logic_vector(0 to 6) 	:= "0101000";
+    constant c_L 		: std_logic_vector(0 to 6) 	:= "1110001";
+    constant c_M 		: std_logic_vector(0 to 6) 	:= "0101011";
+    constant c_N 		: std_logic_vector(0 to 6) 	:= "0001001";
+    constant c_O 		: std_logic_vector(0 to 6) 	:= "0000001";
+    constant c_P 		: std_logic_vector(0 to 6) 	:= "0011000";
+    constant c_Q 		: std_logic_vector(0 to 6) 	:= "0001100";
+    constant c_R 		: std_logic_vector(0 to 6) 	:= "1111010";
+    constant c_S 		: std_logic_vector(0 to 6) 	:= "0100100";
+    constant c_T 		: std_logic_vector(0 to 6) 	:= "1110000";
+    constant c_U 		: std_logic_vector(0 to 6) 	:= "1000001";
+    constant c_V 		: std_logic_vector(0 to 6) 	:= "1000101";
+    constant c_W 		: std_logic_vector(0 to 6) 	:= "1010101";
+    constant c_X 		: std_logic_vector(0 to 6) 	:= "1001000";
+    constant c_Y 		: std_logic_vector(0 to 6) 	:= "1000100";
+    constant c_Z 		: std_logic_vector(0 to 6) 	:= "0010110";
+    constant c_comma 	: std_logic_vector(0 to 6) 	:= "1100111";
+    constant c_dash 	: std_logic_vector(0 to 6)  := "1111110";
+    constant c_blank 	: std_logic_vector(0 to 6) 	:= "1111111";
+
+begin
+
+---- Assignment Part ------------------------------------------------
+
+   --       0  
+   --      ---  
+   --     |   |
+   --    5|   |1
+   --     | 6 |
+   --      ---  
+   --     |   |
+   --    4|   |2
+   --     |   |
+   --      ---  
+   --       3  
+
+-- Concurrent Assignments:
+	-- Conditional Signal Assignment
+	p_multiplex_7seg: process (slv_hex)
+	begin	
+		case (slv_hex) is
+			when "000000"  =>	slv_display <= c_0;
+			when "000001"  =>	slv_display <= c_1;
+			when "000010"  =>	slv_display <= c_2;
+			when "000011"  =>	slv_display <= c_3;
+			when "000100"  =>	slv_display <= c_4;
+			when "000101"  =>	slv_display <= c_5;
+			when "000110"  =>	slv_display <= c_6;
+			when "000111"  =>	slv_display <= c_7;
+			when "001000"  =>	slv_display <= c_8;
+			when "001001"  =>	slv_display <= c_9;
+			when "001010"  =>	slv_display <= c_A;
+			when "001011"  =>	slv_display <= c_B;
+			when "001100"  =>	slv_display <= c_C;
+			when "001101"  =>	slv_display <= c_D;
+			when "001110"  =>	slv_display <= c_E;
+			when "001111"  =>	slv_display <= c_F;
+			when "010000"  =>	slv_display <= c_G;
+			when "010001"  =>	slv_display <= c_H;
+			when "010010"  =>	slv_display <= c_I;
+			when "010011"  =>	slv_display <= c_J;
+			when "010100"  =>	slv_display <= c_K;
+			when "010101"  =>	slv_display <= c_L;
+			when "010110"  =>	slv_display <= c_M;
+			when "010111"  =>	slv_display <= c_N;
+			when "011000"  =>	slv_display <= c_O;
+			when "011001"  =>	slv_display <= c_P;
+			when "011010"  =>	slv_display <= c_Q;
+			when "011011"  =>	slv_display <= c_R;
+			when "011100"  =>	slv_display <= c_S;
+			when "011101"  =>	slv_display <= c_T;
+			when "011110"  =>	slv_display <= c_U;
+			when "011111"  =>	slv_display <= c_V;
+			when "100000"  =>	slv_display <= c_W;
+			when "100001"  =>	slv_display <= c_X;
+			when "100010"  =>	slv_display <= c_Y;
+			when "100011"  =>	slv_display <= c_Z;
+			when "100100"  =>	slv_display <= c_comma;
+			when "100101"  =>	slv_display <= c_dash;
+			when "100110"  =>	slv_display <= c_blank;
+			when others    =>	slv_display <= c_blank;
+		end case;										
+	end process p_multiplex_7seg;
+
+end architecture a_convert_to_7seg;
+--MODULO COUNTER--
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+
+entity e_car_wash_FSM is
+	port(	sl_clock, sl_reset_n:			in	std_logic;
+			sl_ack_button_n:				in 	std_logic;
+			sl_pay_button_n:				in 	std_logic;
+			sl_back_button_n:				in 	std_logic;
+			sl_emergency_stop_n:			in 	std_logic;
+			sl_home_request:				in 	std_logic;
+			slv_program_selection:			in	std_logic_vector (4 downto 0);
+			
+			sl_axis_in_bas_pos:				in	std_logic;
+			sl_axis_in_wrk_pos:				in	std_logic;
+			
+			i_axis_speed_s_pro_m:			out	integer range 0 to 99; -- min. speed is 99 s/m
+			sl_axis_to_bas_pos_activate: 	out	std_logic;
+			sl_axis_to_wrk_pos_activate: 	out	std_logic;
+			
+			sl_selection_enable:			out	std_logic;
+			sl_sequence_busy:				out	std_logic;
+			sl_sequence_done:				out	std_logic;
+			
+			sl_washing_jets_activate: 		out	std_logic;
+			sl_drying_jets_activate: 		out	std_logic;
+			sl_rims_activate: 				out	std_logic;
+			sl_undercarriage_activate: 		out	std_logic;
+			sl_wax_activate: 				out	std_logic;
+			sl_polish_activate: 			out	std_logic;
+			sl_shine_activate: 				out	std_logic;
+			
+			slv_current_seq_state:			out std_logic_vector(3 downto 0)
+	);
+end entity e_car_wash_FSM;
+
+
+architecture a_car_wash_FSM of e_car_wash_FSM is
+
+	-- Type Declaration
+	type t_car_wash_states is (	S_IDLE, S_PRICE, S_WASH_START, S_WASH_AXIS_BACK, S_RIM_CLEANING, S_SHINE_START, S_SHINE_AXIS_BACK,
+								S_WAXING_START, S_WAXING_AXIS_BACK, S_DRY_START, S_DRY_AXIS_BACK, S_POLISH_START, S_POLISH_AXIS_BACK, S_HOME, S_DONE);
+	-- Synthesis Attribute Declarations
+	attribute syn_encoding : string;
+	attribute syn_encoding of t_car_wash_states : type is "0000 0001 0010 0011 0100 0101 0110 0111 1000 1001 1010 1011 1100 1101 1110";							
+	
+	signal car_wash_state, car_wash_nextstate : t_car_wash_states := S_IDLE;
+   
+	signal	i_axis_speed_s_pro_m_int:			integer range 0 to 511; -- max. speed is 511 mm/s
+	signal	sl_axis_to_bas_pos_activate_int: 	std_logic;
+	signal	sl_axis_to_wrk_pos_activate_int: 	std_logic;
+   
+	signal sl_program_selection_rims_int:			std_logic;
+	signal sl_program_selection_undercarriage_int:	std_logic;
+	signal sl_program_selection_wax_int:			std_logic;
+	signal sl_program_selection_polish_int:			std_logic;
+	signal sl_program_selection_shine_int:			std_logic;
+	
+	signal sl_timer_enable_int: 				std_logic;
+	signal sl_rollover_slow_enable_int: 		std_logic;
+	signal sl_rollover_value_slow_enable_int: 	std_logic_vector(28 downto 0);
+	
+	signal sl_undercarriage_activate_temp: 		std_logic;
+	
+	
+	component e_modulo_counter
+	generic( n: natural := 29);
+	port (	sl_clock, sl_reset_n:	in		std_logic;
+			sl_enable:				in		std_logic;
+			slv_rollover_value:		in		std_logic_vector(n-1 downto 0);
+			slv_Q:					out		std_logic_vector(n-1 downto 0);
+			sl_rollover:			out		std_logic
+	);
+	end component;
+   
+begin
+
+	sl_program_selection_shine_int			<= slv_program_selection(4);
+	sl_program_selection_polish_int			<= slv_program_selection(3);
+	sl_program_selection_wax_int			<= slv_program_selection(2);
+	sl_program_selection_undercarriage_int	<= slv_program_selection(1);
+	sl_program_selection_rims_int			<= slv_program_selection(0);
+	
+	sl_rollover_value_slow_enable_int	<=	std_logic_vector(to_unsigned(50,29));		--changed to 50 instead of 500.000.000 (10 sec) for simulation purposes
+	
+	slv_current_seq_state				<=	std_logic_vector(to_unsigned(t_car_wash_states'POS(car_wash_state),4));
+	
+	--activate undercarriage only if it´s selected as an option
+	sl_undercarriage_activate <= (sl_program_selection_undercarriage_int and sl_undercarriage_activate_temp);
+	
+	p_car_wash_FSM_determine_nextstate: process (	car_wash_state, sl_ack_button_n, sl_pay_button_n, sl_back_button_n, sl_axis_in_bas_pos, sl_axis_in_wrk_pos, sl_rollover_slow_enable_int, sl_home_request,
+													sl_program_selection_shine_int, sl_program_selection_polish_int, sl_program_selection_wax_int , sl_program_selection_undercarriage_int , sl_program_selection_rims_int )
+	begin				
+		case(car_wash_state) is
+			when S_IDLE => 
+				if ((sl_ack_button_n='0') and (sl_axis_in_bas_pos = '1')) then
+					car_wash_nextstate <= S_PRICE;
+				elsif((sl_home_request='1') and (sl_axis_in_bas_pos = '0')) then
+					car_wash_nextstate <= S_HOME;
+				else
+					car_wash_nextstate <= S_IDLE;
+				end if;
+			when S_PRICE =>
+				if (sl_pay_button_n='0') then
+					car_wash_nextstate <= S_WASH_START;
+				elsif(sl_back_button_n='0') then
+					car_wash_nextstate <= S_IDLE;
+				else
+					car_wash_nextstate <= S_PRICE;
+				end if;
+			when S_WASH_START =>
+				if (sl_axis_in_wrk_pos = '1') then
+					car_wash_nextstate <= S_WASH_AXIS_BACK;
+				else
+					car_wash_nextstate <= S_WASH_START;
+				end if;
+			when S_WASH_AXIS_BACK =>
+				if (sl_axis_in_bas_pos = '1') then
+					if 	  (sl_program_selection_rims_int = '1') then
+						car_wash_nextstate <= S_RIM_CLEANING;
+					elsif (sl_program_selection_shine_int = '1') then
+						car_wash_nextstate <= S_SHINE_START;
+					elsif (sl_program_selection_wax_int = '1') then
+						car_wash_nextstate <= S_WAXING_START;		
+					else
+						car_wash_nextstate <= S_DRY_START;						
+					end if;
+				else
+					car_wash_nextstate <= S_WASH_AXIS_BACK;
+				end if;
+			when S_RIM_CLEANING =>
+				if (sl_rollover_slow_enable_int = '1') then
+					if    (sl_program_selection_shine_int = '1') then
+						car_wash_nextstate <= S_SHINE_START;
+					elsif (sl_program_selection_wax_int = '1') then
+						car_wash_nextstate <= S_WAXING_START;		
+					else
+						car_wash_nextstate <= S_DRY_START;						
+					end if;
+				else
+					car_wash_nextstate <= S_RIM_CLEANING;
+				end if;		
+			when S_SHINE_START =>
+				if (sl_axis_in_wrk_pos = '1') then
+					car_wash_nextstate <= S_SHINE_AXIS_BACK;
+				else
+					car_wash_nextstate <= S_SHINE_START;
+				end if;
+			when S_SHINE_AXIS_BACK =>
+				if (sl_axis_in_bas_pos = '1') then
+					if (sl_program_selection_wax_int = '1') then
+						car_wash_nextstate <= S_WAXING_START;		
+					else
+						car_wash_nextstate <= S_DRY_START;						
+					end if;
+				else
+					car_wash_nextstate <= S_SHINE_AXIS_BACK;
+				end if;	
+			when S_WAXING_START =>
+				if (sl_axis_in_wrk_pos = '1') then
+					car_wash_nextstate <= S_WAXING_AXIS_BACK;
+				else
+					car_wash_nextstate <= S_WAXING_START;
+				end if;
+			when S_WAXING_AXIS_BACK =>
+				if (sl_axis_in_bas_pos = '1') then
+					car_wash_nextstate <= S_DRY_START;						
+				else
+					car_wash_nextstate <= S_WAXING_AXIS_BACK;
+				end if;
+			when S_DRY_START =>
+				if (sl_axis_in_wrk_pos = '1') then
+					car_wash_nextstate <= S_DRY_AXIS_BACK;
+				else
+					car_wash_nextstate <= S_DRY_START;
+				end if;
+			when S_DRY_AXIS_BACK =>
+				if (sl_axis_in_bas_pos = '1') then
+					if (sl_program_selection_polish_int = '1') then
+						car_wash_nextstate <= S_POLISH_START;		
+					else
+						car_wash_nextstate <= S_DONE;						
+					end if;					
+				else
+					car_wash_nextstate <= S_DRY_AXIS_BACK;
+				end if;
+			when S_POLISH_START =>
+				if (sl_axis_in_wrk_pos = '1') then
+					car_wash_nextstate <= S_POLISH_AXIS_BACK;
+				else
+					car_wash_nextstate <= S_POLISH_START;
+				end if;
+			when S_POLISH_AXIS_BACK =>
+				if (sl_axis_in_bas_pos = '1') then
+					car_wash_nextstate <= S_DONE;	
+				else
+					car_wash_nextstate <= S_POLISH_AXIS_BACK;
+				end if;
+			when S_HOME =>
+				if (sl_axis_in_bas_pos = '1') then
+					car_wash_nextstate <= S_DONE;	
+				else
+					car_wash_nextstate <= S_HOME;
+				end if;
+			when S_DONE =>
+				if (sl_rollover_slow_enable_int = '1') then
+					car_wash_nextstate <= S_IDLE;
+				else
+					car_wash_nextstate <= S_DONE;
+				end if;
+			when others =>
+				car_wash_nextstate <= S_IDLE;
+		end case;
+	end process p_car_wash_FSM_determine_nextstate;
+
+
+	p_car_wash_FSM_refresh_nextstate: process(sl_clock, sl_reset_n, sl_emergency_stop_n)
+	begin
+		if (sl_reset_n = '0' or sl_emergency_stop_n = '0') then         --asynchronous reset and emergency stop
+            car_wash_state <= S_IDLE;
+		elsif (rising_edge(sl_clock)) then
+			car_wash_state <= car_wash_nextstate;
+		end if;
+	end process p_car_wash_FSM_refresh_nextstate;
+
+
+	p_car_wash_FSM_output: process (car_wash_state)
+	begin
+		case(car_wash_state) is
+			when S_IDLE =>
+				i_axis_speed_s_pro_m			<=	0;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'1';
+				sl_sequence_busy				<=	'0';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_PRICE =>	
+				i_axis_speed_s_pro_m			<=	0;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_WASH_START =>	
+				i_axis_speed_s_pro_m			<=	15;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'1';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'1';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp 	<= 	'1';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_WASH_AXIS_BACK =>
+				i_axis_speed_s_pro_m			<=	5;
+				sl_axis_to_bas_pos_activate		<=	'1';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_RIM_CLEANING =>	
+				i_axis_speed_s_pro_m			<=	0;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'1';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'1';
+			when S_SHINE_START =>	
+				i_axis_speed_s_pro_m			<=	10;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'1';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'1';
+				sl_timer_enable_int				<=	'0';
+			when S_SHINE_AXIS_BACK =>	
+				i_axis_speed_s_pro_m			<=	10;
+				sl_axis_to_bas_pos_activate		<=	'1';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'1';
+				sl_timer_enable_int				<=	'0';
+			when S_WAXING_START =>	
+				i_axis_speed_s_pro_m			<=	15;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'1';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'1';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_WAXING_AXIS_BACK =>	
+				i_axis_speed_s_pro_m			<=	5;
+				sl_axis_to_bas_pos_activate		<=	'1';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_DRY_START =>	
+				i_axis_speed_s_pro_m			<=	10;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'1';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'1';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_DRY_AXIS_BACK =>	
+				i_axis_speed_s_pro_m			<=	10;
+				sl_axis_to_bas_pos_activate		<=	'1';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'1';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_POLISH_START =>	
+				i_axis_speed_s_pro_m			<=	15;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'1';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'1';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_POLISH_AXIS_BACK =>	
+				i_axis_speed_s_pro_m			<=	5;
+				sl_axis_to_bas_pos_activate		<=	'1';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_HOME =>	
+				i_axis_speed_s_pro_m			<=	15;
+				sl_axis_to_bas_pos_activate		<=	'1';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'1';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+			when S_DONE =>	
+				i_axis_speed_s_pro_m			<=	0;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'0';
+				sl_sequence_done				<=	'1';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'1';
+			when others =>	
+				i_axis_speed_s_pro_m			<=	0;
+				sl_axis_to_bas_pos_activate		<=	'0';
+				sl_axis_to_wrk_pos_activate		<=	'0';
+				sl_selection_enable				<=	'0';
+				sl_sequence_busy				<=	'0';
+				sl_sequence_done				<=	'0';
+				sl_washing_jets_activate		<=	'0';
+				sl_drying_jets_activate			<=	'0';
+				sl_rims_activate				<=	'0';
+				sl_undercarriage_activate_temp	<=	'0';
+				sl_wax_activate					<=	'0';
+				sl_polish_activate				<=	'0';
+				sl_shine_activate				<=	'0';
+				sl_timer_enable_int				<=	'0';
+		end case;
+	end process p_car_wash_FSM_output;
+	
+	I_my_slow_enable: e_modulo_counter	
+	generic map (	n => 29)
+	port map (	sl_clock			=>	sl_clock,
+				sl_reset_n			=>	sl_reset_n,
+				sl_enable 			=>	sl_timer_enable_int,
+				slv_rollover_value 	=>	sl_rollover_value_slow_enable_int,
+				slv_Q				=>	open,
+				sl_rollover			=>	sl_rollover_slow_enable_int
+			);   
+	
+end architecture a_car_wash_FSM;
+   
+   library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity e_axis is
+	generic( n: natural := 7; wrk: integer := 100);
+	port (	sl_clock, sl_reset_n:	in		std_logic;
+			sl_cmd_to_bas_pos:		in		std_logic;
+			sl_cmd_to_wrk_pos:		in		std_logic;
+			i_speed_s_pro_m:		in		integer range 0 to 99; 	-- min. speed is 99 s/m
+			i_pos:					out		integer range 0 to wrk;
+			sl_axis_moving:			out		std_logic;
+			sl_in_bas_pos:			out		std_logic;
+			sl_in_wrk_pos:			out		std_logic
+	);
+end entity e_axis;
+
+architecture a_axis of e_axis is
+
+-- Declarations:
+
+-- Signal Declarations:
+	signal i_pos_int:				integer range 0 to wrk;
+	signal sl_axis_moving_int:		std_logic;
+	signal sl_in_bas_pos_int:		std_logic := '0';
+	signal sl_in_wrk_pos_int:		std_logic := '0';
+	
+	signal sl_rollover_value_1mm_int:	std_logic_vector(22 downto 0);
+	
+	
+	signal sl_rollover_slow_enable_1mm_int:	std_logic;
+	
+
+	component e_modulo_counter
+	generic( n: natural := 31);
+	port (	sl_clock, sl_reset_n:	in		std_logic;
+			sl_enable:				in		std_logic;
+			slv_rollover_value:		in		std_logic_vector(n-1 downto 0);
+			slv_Q:					out		std_logic_vector(n-1 downto 0);
+			sl_rollover:			out		std_logic
+	);
+	end component;
+	
+begin
+
+-- Assignments:
+
+-- Concurrent Assignments:
+	i_pos 			<= i_pos_int;
+	sl_axis_moving 	<= sl_axis_moving_int;
+	sl_in_bas_pos	<=	sl_in_bas_pos_int;
+	sl_in_wrk_pos 	<=	sl_in_wrk_pos_int;
+	
+	sl_rollover_value_1mm_int	<=	std_logic_vector(to_unsigned((1 * i_speed_s_pro_m),23));	--multiplicator reduced from normally 50000 (50000000/1000 because unit is mm and not m) to 1 for simulation purposes
+	
+-- Conditional Signal Assignments:
+	
+	sl_axis_moving_int <= '1' when ((i_speed_s_pro_m /= 0) and (((sl_cmd_to_bas_pos = '1') and (sl_in_bas_pos_int = '0')) or ((sl_cmd_to_wrk_pos = '1')  and (sl_in_wrk_pos_int = '0')))) else '0';
+	
+-- Sequential process with async. low-active reset:
+	p_move_axis: process(sl_clock, sl_reset_n)
+	begin
+		if(sl_reset_n = '0') then
+			i_pos_int <= 0;
+			sl_in_bas_pos_int <= '0';
+			sl_in_wrk_pos_int <= '0';
+		elsif(rising_edge(sl_clock)) then
+			if(sl_rollover_slow_enable_1mm_int = '1') then
+				if(sl_cmd_to_bas_pos = '1') then
+					i_pos_int <= i_pos_int-1;
+				elsif(sl_cmd_to_wrk_pos = '1') then
+					i_pos_int <= i_pos_int+1;
+				end if;
+			end if;
+			if (((i_pos_int = 0) and ((sl_rollover_slow_enable_1mm_int = '0') or (sl_cmd_to_wrk_pos = '0'))) or ((i_pos_int = 1) and (sl_rollover_slow_enable_1mm_int = '1') and (sl_cmd_to_bas_pos = '1'))) then
+				sl_in_bas_pos_int <= '1';
+			else
+				sl_in_bas_pos_int <= '0';
+			end if;	
+			if (((i_pos_int = wrk) and ((sl_rollover_slow_enable_1mm_int = '0') or (sl_cmd_to_bas_pos = '0'))) or ((i_pos_int = wrk-1) and (sl_rollover_slow_enable_1mm_int = '1') and (sl_cmd_to_wrk_pos = '1'))) then
+				sl_in_wrk_pos_int <= '1';
+			else
+				sl_in_wrk_pos_int <= '0';
+			end if;	
+		end if;
+	end process p_move_axis;
+	
+	
+	-- Component Instantiations:
+	I_my_slow_enable_1sec: e_modulo_counter	
+		generic map (	n => 23)
+		port map (	sl_clock			=>	sl_clock,
+					sl_reset_n			=>	sl_axis_moving_int,
+					sl_enable 			=>	sl_axis_moving_int,
+					slv_rollover_value 	=>	sl_rollover_value_1mm_int,		--std_logic_vector(to_unsigned(c_COUNTER_MAXVAL, n)),
+					slv_Q				=>	open,
+					sl_rollover			=>	sl_rollover_slow_enable_1mm_int
+				);
+	
+end architecture a_axis;
