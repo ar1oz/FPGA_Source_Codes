@@ -1,0 +1,449 @@
+VHDL CODE FOR Finite System Machine:
+LIBRARY ieee;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+ENTITY fsm IS
+PORT     (
+         clk: IN STD_LOGIC;
+         run           : IN STD_LOGIC;
+         reset         : OUT STD_LOGIC;
+         alu_op        : OUT STD_LOGIC_VECTOR (2 DOWNTO 0);              		
+         mop           : IN STD_LOGIC_VECTOR (3 DOWNTO 0);
+      	 input_select  : OUT STD_LOGIC_VECTOR (2 DOWNTO 0); 
+      	 load_a        : OUT STD_LOGIC;
+     	 load_b        : OUT STD_LOGIC;
+         cin           : OUT STD_LOGIC;
+         out_state     : OUT STD_LOGIC_VECTOR (3 DOWNTO 0)
+         
+ );
+END fsm;
+
+ARCHITECTURE Behavior OF fsm IS
+SIGNAL y_present, y_next : STD_LOGIC_VECTOR(4 DOWNTO 0);
+CONSTANT s0  : STD_LOGIC_VECTOR(4 DOWNTO 0) := "10000";
+CONSTANT s1  : STD_LOGIC_VECTOR(4 DOWNTO 0) := "01000";
+CONSTANT s2  : STD_LOGIC_VECTOR(4 DOWNTO 0) := "00100";
+CONSTANT s3  : STD_LOGIC_VECTOR(4 DOWNTO 0) := "00010";
+CONSTANT s4  : STD_LOGIC_VECTOR(4 DOWNTO 0) := "00001";
+BEGIN
+	PROCESS (run, y_present)
+	BEGIN
+		CASE y_present IS
+				WHEN s0 =>
+				IF run='0' THEN y_next <= s0;
+				ELSIF run='1' THEN y_next <= s1;
+				END IF;
+				
+				WHEN s1 =>
+				IF run='0' THEN y_next <= s0;
+				ELSIF run='1' THEN  y_next <= s2;
+				END IF;
+				
+				WHEN s2 =>
+				IF run='0' THEN y_next <= s0;
+				ELSIF run='1' THEN  y_next <= s3;
+				END IF;	
+				
+				WHEN s3 =>
+				IF run='0' THEN y_next <=s0;
+				ELSIF run='1' THEN  y_next <= s4;
+				END IF;
+				
+				WHEN s4 =>
+				IF run='0' THEN  y_next <= s0;
+				ELSIF run='1' THEN  y_next <= s4;
+				END IF;
+				
+				WHEN OTHERS =>
+				y_next <= s0;
+	END CASE;
+	END PROCESS;
+	
+	PROCESS (clk)
+	BEGIN
+		IF run='0' THEN
+		y_present <= s0;
+		ELSIF (clk'EVENT AND clk='1') THEN
+		y_present <= y_next;
+		END IF;
+		
+	END PROCESS;
+	
+		process (y_present, mop)
+		begin
+		 if y_present = s0 then 
+				out_state <= "0000";
+				input_select <= "000";
+				load_a <= '0';
+				load_b <= '0';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';	
+				end if; 
+				
+          if y_present = s1 then  
+		  	if (mop="0111") then
+				out_state <= "0001";
+				input_select <= "100";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "001";
+				reset <= '0';	
+				else
+				out_state <= "0001";
+				input_select <= "000";
+				load_a <= '0';
+				load_b <= '0';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+			    end if;	
+			    end if;
+			    
+			    
+			    if y_present = s2 then   
+		     	if (mop="0111") then
+				out_state <= "0010";
+				input_select <= "100";
+				load_a <= '1';
+				load_b <= '0';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+				else
+				out_state <= "0010";
+				input_select <= "000";
+				load_a <= '0';
+				load_b <= '0';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+			    end if;	
+			    end if;	
+				
+			      
+			   if y_present = s3 then  
+				if (mop="0000") then
+				out_state <= "0011";
+				input_select <= "000";
+				load_a <= '0';
+				load_b <= '0';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+				
+				elsif (mop="0001") then
+				out_state <= "0011";
+                input_select <= "000";
+                load_a <= '0';
+                load_b <= '0';
+				cin <= '0';
+				alu_op <= "000";
+	            reset <= '1';
+	         
+	            elsif (mop="0010") then
+				out_state <= "0011";	
+                input_select <= "110";
+				load_a <= '1';
+			    load_b <= '0';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+
+				
+				elsif (mop="0011") then
+				out_state <= "0011";
+				input_select <= "110";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';		
+				
+				elsif (mop="0100") then
+				out_state <= "0011";
+				input_select <= "000";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+				
+				elsif (mop="0101") then
+				out_state <= "0011";
+				input_select <= "100";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "001";
+				reset <= '0';
+				
+				elsif (mop="0110") then
+				out_state <= "0011";
+				input_select <= "100";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '1';
+				alu_op <= "001";
+				reset <= '0';
+				
+				elsif (mop="0111") then
+				out_state <= "0011";
+				input_select <= "110";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "001";
+				reset <= '0';
+				
+				elsif (mop="1000") then
+				out_state <= "0011";
+				input_select <= "101";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '1';
+				alu_op <= "001";
+				reset <= '0';
+				
+				elsif (mop="1001") then
+				out_state <= "0011";
+				input_select <= "101";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+				
+				elsif (MOP="1010") then
+				out_state <= "0011";
+				input_select <= "100";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "101";
+				reset <= '0';
+				
+				elsif (mop="1011") then
+				out_state <= "0011";
+				input_select <= "100";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "100";
+				reset <= '0';
+				
+				elsif (mop="1100") then
+				out_state <= "0011";
+				input_select <= "100";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "110";
+				reset <= '0';
+				
+				elsif (mop="1101") then
+				out_state <= "0011";
+				input_select <= "010";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+				
+				elsif (mop="1110") then
+				out_state <= "0011";
+				input_select <= "001";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+				
+				elsif (mop="1111") then
+				out_state <= "0011";
+				input_select <= "011";
+				load_a <= '0';
+				load_b <= '1';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';
+				end if;
+				
+			    end if; 
+			    
+			    if y_present = s4 then 
+				out_state <= "0100";
+				input_select <= "000";
+				load_a <= '0';
+				load_b <= '0';
+				cin <= '0';
+				alu_op <= "000";
+				reset <= '0';	
+				end if; 
+		 end process;	  
+END Behavior;
+LIBRARY IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_SIGNED.ALL;
+entity ALU is
+			Port( ALU_OP: in STD_LOGIC_VECTOR (2 downto 0);
+				  X: in STD_LOGIC_VECTOR (3 downto 0);
+		  		Y: in STD_LOGIC_VECTOR (3 downto 0);
+		  		Cin: in STD_LOGIC;
+		  		Cout: out STD_LOGIC;
+		 		 ALU_OUT: out STD_LOGIC_VECTOR (3 downto 0) );		  
+end ALU;
+
+
+ARCHITECTURE Behavioral of ALU is
+BEGIN
+		process(ALU_OP, X, Y, Cin)
+		BEGIN
+				case ALU_OP is
+		     			WHEN "000" => ALU_OUT <=  X;
+		    			WHEN "001" => ALU_OUT <=  X +  Y + (Cin);
+		     			WHEN "010" => ALU_OUT <=  X - Y - (NOT Cin);
+		   			WHEN "011" => ALU_OUT <=  Y - X - (NOT Cin);
+		   		  	WHEN "100" => ALU_OUT <=  X OR Y;
+		    			WHEN "101" => ALU_OUT <=  X AND Y;
+		     		WHEN "110" => ALU_OUT <=  X XOR Y;
+		    		 WHEN OTHERS => ALU_OUT <= X XNOR Y;
+
+            			end case;
+         		  end PROCESS;	
+           end BEHAVIORALl; 
+
+LIBRARY IEEE; 
+use IEEE.STD_LOGIC_1164.ALL; 
+use IEEE.STD_LOGIC_ARITH.ALL; 
+use IEEE.STD_LOGIC_UNSIGNED.ALL; 
+entity ARS is 
+         			port (            input  : in STD_LOGIC_VECTOR (3 DOWNTO 0); 
+                             			       output : out STD_LOGIC_VECTOR (3 DOWNTO 0)); 
+end ARS;
+
+
+ARCHITECTURE Behavioral of ARS is 
+      BEGIN
+
+             		process (input) 
+                     		 BEGIN
+
+                          				output(3) <= input(3); 
+                         				 output(2) <= input(3); 
+                       		  		output(1) <= input(2); 
+                         				output(0) <= input(1); 
+end process; 
+end Behavioral;
+
+
+
+LIBRARY IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+entity LRS is
+      			port (  input : in  STD_LOGIC_VECTOR (3 DOWNTO 0);
+                			output : out  STD_LOGIC_VECTOR (3 DOWNTO 0));
+end LRS;
+
+
+
+ARCHITECTURE Behavioral of LRS is
+BEGIN
+           process (input)
+                BEGIN
+
+                     output(3) <= '0';
+                     output(2) <= input(3);
+                     output(1) <= input(2);
+                     output(0) <= input(1);
+end process;
+end Behavioral;
+
+
+
+use IEEE.STD_LOGIC_1164.ALL; 
+use IEEE.STD_LOGIC_ARITH.ALL; 
+use IEEE.STD_LOGIC_UNSIGNED.ALL; 
+entity LLS is 
+          Port ( input : in STD_LOGIC_VECTOR (3 DOWNTO 0); 
+                    output : out STD_LOGIC_VECTOR (3 DOWNTO 0)); 
+end LLS; 
+
+
+ARCHITECTURE Behavioral of LLS is 
+BEGIN
+         		process (input) 
+             			BEGIN
+
+                   			output(0) <= '0'; 
+                		 	output(1) <= input(0); 
+                  			output(2) <= input(1); 
+                  			output(3) <= input(2); 
+end process;
+end Behavioral;
+
+
+
+LIBRARYI IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+entity REG4 is
+   			 port ( d : in  STD_LOGIC_VECTOR (3 DOWNTO 0);
+          				  clk : in  STD_LOGIC;
+         				  rst : in  STD_LOGIC;
+        				 load : in  STD_LOGIC;
+              				  Q : out  STD_LOGIC_VECTOR (3 DOWNTO 0));
+end REG4;
+
+
+
+ARCHITECTURE Behavioral of REG4 is
+BEGIN
+    			 PROCESS (clk,rst,load)
+	  			  BEGIN
+
+                          				 if clk'event and clk ='1' then
+	                  			 if rst='1' then
+		           			Q <= "0000";
+		    			elsif load='1' then
+		           			Q <= d;
+end if;
+end if;
+end process;	
+end Behavioral;
+LIBRARYI IEEE;
+use IEEE.STD_LOGIC_1164.ALL; 
+use IEEE.STD_LOGIC_ARITH.ALL; 
+use IEEE.STD_LOGIC_UNSIGNED.ALL; 
+ENTITY 8TOONEMUX IS
+			PORT (     Input0 : IN STD_LOGIC_VECTOR (3 DOWNTO 0); 
+		 		Input1 : IN STD_LOGIC_VECTOR (3 DOWNTO 0);
+				 Input2 : IN STD_LOGIC_VECTOR (3 DOWNTO 0);
+				 Input3 : IN STD_LOGIC_VECTOR (3 DOWNTO 0);
+		 		Input4 : IN STD_LOGIC_VECTOR (3 DOWNTO 0);
+		 		Input5 : IN STD_LOGIC_VECTOR (3 DOWNTO 0);
+				 Input6 : IN STD_LOGIC_VECTOR (3 DOWNTO 0);
+		 		Input7 : IN STD_LOGIC_VECTOR (3 DOWNTO 0);
+				 S : IN STD_LOGIC_VECTOR (2 DOWNTO 0);
+		 		Output : OUT STD_LOGIC_VECTOR (3 DOWNTO 0));
+END 8TOONEMUX;
+
+ARCHITECTURE Behavior OF 8TOONEMUX IS	
+BEGIN
+		WITH S SELECT
+		  	  Output <=   Input0 WHEN "000",
+		                      	   Input1 WHEN "001",
+			       	  Input2 WHEN "010",
+			     	   Input3 WHEN "011",
+            		                      	  Input4 WHEN "100", 
+             		                     	  Input5 WHEN "101", 
+            		                        	 Input6 WHEN "110",
+             		                      	 Input7 WHEN OTHERS;
+END Behavior;
+
